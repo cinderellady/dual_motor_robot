@@ -1,0 +1,17 @@
+# 编译产物
+build/
+install/
+log/
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# VS Code 配置（可选，如果你想分享自己的编辑器配置可以删掉这行）
+.vscode/
+
+# 其他临时文件
+*.swp
+*.swo
+*~
+.DS_Store
