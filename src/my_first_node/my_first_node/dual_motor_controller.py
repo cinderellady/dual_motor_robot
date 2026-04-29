@@ -78,6 +78,7 @@ class DualMotorController(Node):
 
     def cmd_callback(self, msg: Twist):
         left_rpm, right_rpm = twist_to_rpm(msg.linear.x, msg.angular.z)
+        right_rpm = -right_rpm
         if self.left_online:
             self.left.set_speed(int(left_rpm))
         if self.right_online:
