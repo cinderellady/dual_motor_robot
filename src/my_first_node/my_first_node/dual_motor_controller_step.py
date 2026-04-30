@@ -8,7 +8,16 @@ from std_msgs.msg import String
 import threading
 import time
 
-from my_first_node.motor_driver import M0603AMotor   # 假设你的驱动类
+from my_first_node.motor_driver import M0603AMotor
+
+# ========== 方向配置（根据实际接线调整） ==========
+# 如果前进时实际后退，设为 True
+INVERT_LINEAR = False
+# 如果右转实际左转，设为 True
+INVERT_ANGULAR = False
+# 如果右轮速度符号需要取反（通常取决于电机安装方向），设为 True
+INVERT_RIGHT_WHEEL = False   # 注意：你原始代码中用了 -right_rpm，这里改为 False 则取消取反
+# =================================================
 
 class DualMotorControllerStep(Node):
     def __init__(self):
@@ -19,9 +28,8 @@ class DualMotorControllerStep(Node):
         self.declare_parameter('baudrate', 38400)
         self.declare_parameter('left_id', 1)
         self.declare_parameter('right_id', 2)
-        self.declare_parameter('max_linear_speed', 0.3)   # m/s
-        self.declare_parameter('max_angular_speed', 1.0)  # rad/s
-        self.declare_parameter('reverse_angular', True)   # 方向修正
+        self.declare_parameter('max_linear_speed', 0.3)
+        self.declare_parameter('max_angular_speed', 1.0)
         
         port = self.get_parameter('serial_port').value
         baud = self.get_parameter('baudrate').value
@@ -29,7 +37,6 @@ class DualMotorControllerStep(Node):
         right_id = self.get_parameter('right_id').value
         self.max_linear = self.get_parameter('max_linear_speed').value
         self.max_angular = self.get_parameter('max_angular_speed').value
-        self.reverse_angular = self.get_parameter('reverse_angular').value
         
         # 初始化电机
         if not M0603AMotor.init_serial(port, baud):
@@ -41,20 +48,14 @@ class DualMotorControllerStep(Node):
         if not self.left_online and not self.right_online:
             raise RuntimeError("无可用电机")
         
-        # 速度控制定时器（用于自动停止）
         self.active_timer = None
-        self.active_twist = Twist()
-        
-        # 订阅动作指令
         self.step_sub = self.create_subscription(String, '/step_cmd', self.step_callback, 10)
-        # 可选：同时保留 /cmd_vel 用于传统连续控制（调试用）
         self.cmd_vel_sub = self.create_subscription(Twist, '/cmd_vel', self.cmd_vel_callback, 10)
         
-        self.get_logger().info("步进式电机控制器已启动")
-        self.get_logger().info(f"参数: 线速度={self.max_linear}m/s, 角速度={self.max_angular}rad/s")
+        self.get_logger().info("步进式电机控制器已启动（方向可配置）")
+        self.get_logger().info(f"INVERT_LINEAR={INVERT_LINEAR}, INVERT_ANGULAR={INVERT_ANGULAR}, INVERT_RIGHT_WHEEL={INVERT_RIGHT_WHEEL}")
     
     def stop_motors(self):
-        """停止电机"""
         twist = Twist()
         self._send_twist(twist)
         if self.active_timer:
@@ -62,14 +63,20 @@ class DualMotorControllerStep(Node):
             self.active_timer = None
     
     def _send_twist(self, twist):
-        """将Twist命令转换为左右轮速度并发送"""
-        # 这里重用你原先的 twist_to_rpm 逻辑，复制过来略作修改
-        # 因为你的 dual_motor_controller 中已有，此处直接实现
+        # 应用方向修正
         vx = twist.linear.x
         wz = twist.angular.z
+        if INVERT_LINEAR:
+            vx = -vx
+        if INVERT_ANGULAR:
+            wz = -wz
+        
         left_rpm, right_rpm = self.twist_to_rpm(vx, wz)
-        # 注意方向修正：如果你原先的节点中有 right_rpm = -right_rpm，这里保持一致
-        right_rpm = -right_rpm   # 根据你原来逻辑
+        
+        # 右轮取反修正
+        if INVERT_RIGHT_WHEEL:
+            right_rpm = -right_rpm
+        
         if self.left_online:
             self.left.set_speed(int(left_rpm))
         if self.right_online:
@@ -88,7 +95,6 @@ class DualMotorControllerStep(Node):
         return left_rpm, right_rpm
     
     def step_callback(self, msg):
-        """处理动作指令，字符串格式: 'f 0.2' 或 'l 90'"""
         try:
             parts = msg.data.strip().split()
             if len(parts) != 2:
@@ -100,37 +106,23 @@ class DualMotorControllerStep(Node):
             twist = Twist()
             duration = 0.0
             
-            if action == 'f':   # 前进
+            if action == 'f':
                 twist.linear.x = self.max_linear
                 duration = value / self.max_linear
-                self.get_logger().info(f"前进 {value} 米，运行 {duration:.2f} 秒")
-            elif action == 'b':   # 后退
+            elif action == 'b':
                 twist.linear.x = -self.max_linear
                 duration = value / self.max_linear
-                self.get_logger().info(f"后退 {value} 米，运行 {duration:.2f} 秒")
-            elif action == 'l':   # 左转
-                ang_rad = value * 3.14159 / 180.0
-                wz = self.max_angular
-                if self.reverse_angular:
-                    wz = -wz
-                twist.angular.z = wz
-                duration = ang_rad / self.max_angular
-                self.get_logger().info(f"左转 {value} 度，运行 {duration:.2f} 秒")
-            elif action == 'r':   # 右转
-                ang_rad = value * 3.14159 / 180.0
-                wz = -self.max_angular
-                if self.reverse_angular:
-                    wz = -wz
-                twist.angular.z = wz
-                duration = ang_rad / self.max_angular
-                self.get_logger().info(f"右转 {value} 度，运行 {duration:.2f} 秒")
+            elif action == 'l':
+                twist.angular.z = self.max_angular
+                duration = (value * 3.14159 / 180.0) / self.max_angular
+            elif action == 'r':
+                twist.angular.z = -self.max_angular
+                duration = (value * 3.14159 / 180.0) / self.max_angular
             else:
                 self.get_logger().warn(f"未知动作: {action}")
                 return
             
-            # 执行动作
             self._send_twist(twist)
-            # 设置定时器自动停止
             if self.active_timer:
                 self.active_timer.cancel()
             self.active_timer = threading.Timer(duration, self.stop_motors)
@@ -141,13 +133,10 @@ class DualMotorControllerStep(Node):
             self.get_logger().error(f"处理指令出错: {e}")
     
     def cmd_vel_callback(self, msg):
-        """保留传统连续控制（可选）"""
         self._send_twist(msg)
-        # 如果有动作定时器，取消它
         if self.active_timer:
             self.active_timer.cancel()
             self.active_timer = None
-        self.get_logger().debug("连续控制模式")
     
     def shutdown_hook(self):
         self.stop_motors()
