@@ -26,6 +26,9 @@ setup(
         'console_scripts': [
             'dual_motor_controller = my_first_node.dual_motor_controller:main',
             'keyboard_control = my_first_node.keyboard_control:main',
+            'dual_motor_controller_step = my_first_node.dual_motor_controller_step:main',
+            'step_keyboard.py = my_first_node.step_keyboard:main',
+
         ],
     },
 )
