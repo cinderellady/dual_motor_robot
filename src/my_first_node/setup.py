@@ -25,6 +25,7 @@ setup(
     entry_points={
         'console_scripts': [
             'dual_motor_controller = my_first_node.dual_motor_controller:main',
+            'keyboard_control = my_first_node.keyboard_control:main',
         ],
     },
 )
